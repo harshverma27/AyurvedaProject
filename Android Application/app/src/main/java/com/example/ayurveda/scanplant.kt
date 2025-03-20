@@ -1,69 +1,53 @@
 package com.example.ayurveda
 
+
 import android.content.Context
 import android.net.Uri
-import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.Button
-import androidx.compose.material3.Text
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.rememberImagePainter
-import okhttp3.*
+import coil.compose.rememberAsyncImagePainter
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.Call
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.logging.HttpLoggingInterceptor
-import retrofit2.*
-import retrofit2.converter.gson.GsonConverterFactory
-import retrofit2.http.Multipart
-import retrofit2.http.POST
-import retrofit2.http.Part
+import okhttp3.MultipartBody
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.asRequestBody
+import okio.IOException
+import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
-import java.io.InputStream
-
-// Retrofit API interface
-interface PlantNetApi {
-    @Multipart
-    @POST("v2/identify")
-    fun identifyPlant(
-        @Part file: MultipartBody.Part,
-        @Part("api-key") apiKey: RequestBody // ✅ Pass API key as RequestBody
-    ): Call<PlantResponse>
-}
-
-// Data models
-data class PlantResponse(
-    val bestMatch: BestMatch?
-)
-
-data class BestMatch(
-    val scientificName: String?,
-    val commonNames: List<String>?
-)
-
 @Composable
 fun ScanPlant() {
-    var imageUri by remember { mutableStateOf<Uri?>(null) }
-    var plantName by remember { mutableStateOf("") }
     val context = LocalContext.current
-
-    val launcher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
+    var imageUri by remember { mutableStateOf<Uri?>(null) }
+    var resultText by remember { mutableStateOf("No plant identified") }
+    val api = stringResource(id = com.example.ayurveda.R.string.api)
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         imageUri = uri
-        uri?.let {
-            uploadImage(it, context) { result ->
-                plantName = result // Update UI with plant name
+    }
+
+    // Trigger image processing when imageUri updates
+    LaunchedEffect(imageUri) {
+        imageUri?.let { uri ->
+            processImage(api, uri, context) { result ->
+                resultText = result
             }
         }
     }
@@ -72,92 +56,98 @@ fun ScanPlant() {
         modifier = Modifier
             .fillMaxSize()
             .padding(50.dp),
-        verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(text = "Scan Plant", fontSize = 30.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(25.dp))
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Button(onClick = { imagePicker.launch("image/*") }) {
+            Text(text = "Upload Image")
+        }
+
 
         imageUri?.let {
-            Image(
-                painter = rememberImagePainter(it),
-                contentDescription = null,
-                modifier = Modifier
-                    .size(200.dp)
-                    .clickable { launcher.launch("image/*") }
-            )
-        } ?: Button(onClick = { launcher.launch("image/*") }) {
-            Text(text = "Select Image")
+            Text(text = "Selected Image: ${it.lastPathSegment}")
         }
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        if (plantName.isNotEmpty()) {
-            Text(text = "Plant Name: $plantName", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        ShowInfo(resultText)
+    }
+}
+
+
+fun processImage( api: String,uri: Uri, context: Context, onResult: (String) -> Unit) {
+    val file = uriToFile(uri, context) ?: return
+
+    // Use a coroutine to perform the network request
+    CoroutineScope(Dispatchers.IO).launch {
+        val result = identifyPlant(file, api)
+        withContext(Dispatchers.Main) {
+            onResult(result)
         }
     }
 }
 
-// Function to upload image
-fun uploadImage(uri: Uri, context: Context, onResult: (String) -> Unit) {
-    val apiKey = context.getString(R.string.plant_net_api_key) // ✅ Retrieve API key from secrets.xml
-    Log.d("API_KEY", "Using API Key: $apiKey")
+private fun uriToFile(uri: Uri, context: Context): File? {
+    val inputStream = context.contentResolver.openInputStream(uri) ?: return null
+    val file = File(context.cacheDir, "temp_image.jpg")
+    FileOutputStream(file).use { output -> inputStream.copyTo(output) }
+    return file
+}
+suspend fun identifyPlant(imageFile: File, api: String): String {
+    return withContext(Dispatchers.IO) {
+        val apiKey = api  // Replace with your API key
+        val apiUrl = "https://my-api.plantnet.org/v2/identify/all?api-key=$apiKey"
 
-    val file = uriToFile(uri, context)
-    if (file == null || !file.exists() || file.length() == 0L) {
-        onResult("Error: Invalid image file")
-        return
-    }
+        val client = OkHttpClient()
 
-    val requestFile = RequestBody.create("image/jpeg".toMediaTypeOrNull(), file)
-    val body = MultipartBody.Part.createFormData("images", file.name, requestFile)
-    val apiKeyBody = RequestBody.create("text/plain".toMediaTypeOrNull(), apiKey) // ✅ Convert API key to RequestBody
+        val requestBody = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("organs", "leaf")
+            .addFormDataPart(
+                "images", imageFile.name,
+                imageFile.asRequestBody("image/jpeg".toMediaTypeOrNull())
+            )
+            .build()
 
-    // Retrofit setup with logging
-    val logging = HttpLoggingInterceptor().apply {
-        level = HttpLoggingInterceptor.Level.BODY
-    }
+        val request = Request.Builder()
+            .url(apiUrl)
+            .post(requestBody)
+            .build()
 
-    val client = OkHttpClient.Builder()
-        .addInterceptor(logging)
-        .build()
-
-    val retrofit = Retrofit.Builder()
-        .baseUrl("https://my-api.plantnet.org/") // ✅ Ensure this is correct
-        .addConverterFactory(GsonConverterFactory.create())
-        .client(client)
-        .build()
-
-    val plantNetApi = retrofit.create(PlantNetApi::class.java)
-
-    val call = plantNetApi.identifyPlant(body, apiKeyBody) // ✅ Corrected API call
-    call.enqueue(object : Callback<PlantResponse> {
-        override fun onResponse(call: Call<PlantResponse>, response: Response<PlantResponse>) {
-            if (response.isSuccessful) {
-                val bestMatch = response.body()?.bestMatch
-                onResult(bestMatch?.scientificName ?: "Unknown plant")
-            } else {
-                onResult("Identification failed: ${response.errorBody()?.string()}")
+        try {
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) {
+                return@withContext "Error: ${response.message}"
             }
-        }
 
-        override fun onFailure(call: Call<PlantResponse>, t: Throwable) {
-            onResult("Error: ${t.message}")
-        }
-    })
-}
+            val jsonResponse = JSONObject(response.body?.string() ?: "{}")
+            val bestMatch = jsonResponse.optString("bestMatch", "Unknown")
 
-// Function to convert Uri to File
-fun uriToFile(uri: Uri, context: Context): File? {
-    val inputStream: InputStream? = context.contentResolver.openInputStream(uri)
-    val tempFile = File.createTempFile("upload_", ".jpg", context.cacheDir)
-    tempFile.deleteOnExit()
+            val commonNames = jsonResponse.optJSONArray("results")
+                ?.optJSONObject(0)
+                ?.optJSONObject("species")
+                ?.optJSONArray("commonNames")
 
-    inputStream?.use { input ->
-        FileOutputStream(tempFile).use { output ->
-            input.copyTo(output)
+            val commonName = commonNames?.optString(0) ?: "Unknown"
+
+            return@withContext "$bestMatch"
+        } catch (e: Exception) {
+            return@withContext "Error: ${e.message}"
         }
     }
-    return tempFile
+}
+
+@Composable
+fun ShowInfo(resultText: String) {
+    Card(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(text = resultText, textAlign = TextAlign.Center, modifier = Modifier.padding(16.dp))
+        }
+    }
+
 }
