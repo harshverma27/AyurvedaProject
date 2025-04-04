@@ -1,5 +1,6 @@
 package com.example.ayurveda
 
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -11,12 +12,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import java.net.URLEncoder
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.example.ayurveda.ui.theme.AyurvedaTheme
+import java.net.URLDecoder
+import java.nio.charset.StandardCharsets
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -29,9 +35,25 @@ class MainActivity : ComponentActivity() {
                     NavHost(navController = navController, startDestination = "main_screen", modifier = Modifier.padding(innerPadding)) {
                         composable("main_screen") { MainScreen(navController) }
                         composable("scan_plant") { ScanPlant() }
-                        composable("upload_symptoms") { UploadSymptoms() }
+                        composable("upload_symptoms") { SymptomInputScreen(navController = navController) }
                         composable("bookmarked_plants") { BookmarkedPlants() }
-                        composable("chat_bot") { ChatBot() }
+                        composable("chat_bot") { ChatBot()}
+                        composable(
+                            route = "plant_detail/{plantName}/{plantUse}",
+                            arguments = listOf(
+                                navArgument("plantName") { type = NavType.StringType },
+                                navArgument("plantUse") { type = NavType.StringType }
+                            )
+                        ) { backStackEntry ->
+                            val nameArg = backStackEntry.arguments?.getString("plantName") ?: ""
+                            val useArg = backStackEntry.arguments?.getString("plantUse") ?: ""
+
+                            val decodedName = Uri.decode(nameArg)  // Decode name properly
+                            val decodedUse = Uri.decode(useArg).replace("%2F", "/")  // Decode usage
+
+                            PlantDetailScreen(plantName = decodedName, plantUse = decodedUse)
+                        }
+
                     }
                 }
             }
@@ -77,4 +99,3 @@ fun MainScreen(navController: NavHostController) {
         }
     }
 }
-

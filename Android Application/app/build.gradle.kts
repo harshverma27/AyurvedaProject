@@ -10,7 +10,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.ayurveda"
-        minSdk = 34  // 🔹 Lowered to 24 for better compatibility
+        minSdk = 30 // 🔹 Lowered to 24 for better compatibility
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
@@ -51,16 +51,18 @@ dependencies {
 
     // 🔹 Updated Navigation Compose to stable version
     implementation("androidx.navigation:navigation-compose:2.7.5")
-
+    implementation("com.google.code.gson:gson:2.10.1")
     // 🔹 Coil for image loading (Latest version)
     implementation("io.coil-kt:coil-compose:2.6.0")
+
 
     // 🔹 Retrofit & OkHttp for API requests
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0") // 🔹 Updated to latest
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
-
+    implementation("com.google.android.gms:play-services-location:21.0.1")
+    implementation("androidx.compose.material:material-icons-extended-android:1.7.8")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
